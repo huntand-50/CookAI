@@ -1,129 +1,101 @@
 <?php
 /**
- * Router - роутизатор URL
+ * Router - система маршрутизации приложения
  */
 class Router
 {
     private $routes = [];
-    private $current_route = null;
+    private $params = [];
 
     /**
-     * Регистрация GET-маршрута
+     * Регистрация GET маршрута
      */
-    public function get($path, $action)
+    public function get($path, $handler)
     {
-        $this->routes['GET'][$path] = $action;
+        $this->routes['GET'][$path] = $handler;
     }
 
     /**
-     * Регистрация POST-маршрута
+     * Регистрация POST маршрута
      */
-    public function post($path, $action)
+    public function post($path, $handler)
     {
-        $this->routes['POST'][$path] = $action;
+        $this->routes['POST'][$path] = $handler;
     }
 
     /**
-     * Регистрация DELETE-маршрута
+     * Регистрация PUT маршрута
      */
-    public function delete($path, $action)
+    public function put($path, $handler)
     {
-        $this->routes['DELETE'][$path] = $action;
+        $this->routes['PUT'][$path] = $handler;
     }
 
     /**
-     * Проверка роута и вывыв контроллера
+     * Регистрация DELETE маршрута
      */
-    public function dispatch()
+    public function delete($path, $handler)
     {
-        $method = $_SERVER['REQUEST_METHOD'];
-        $url = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-        
-        // Обрезание base URL
-        $base = '/CookAI/public';
-        $url = str_replace($base, '', $url);
-        if (empty($url)) $url = '/';
-        
-        $this->current_route = $url;
-        
-        // Поиск точного маршрута
-        if (isset($this->routes[$method][$url])) {
-            $this->executeRoute($this->routes[$method][$url], []);
-            return;
+        $this->routes['DELETE'][$path] = $handler;
+    }
+
+    /**
+     * Диспетчеризация запроса
+     */
+    public function dispatch($method, $uri)
+    {
+        if (!isset($this->routes[$method])) {
+            throw new Exception("Метод $method не зарегистрирован");
         }
 
-        // Поиск динамического маршрута с параметрами
-        foreach ($this->routes[$method] ?? [] as $pattern => $action) {
-            if ($this->matchRoute($pattern, $url, $params)) {
-                $this->executeRoute($action, $params);
-                return;
+        foreach ($this->routes[$method] as $path => $handler) {
+            if ($this->match($path, $uri)) {
+                return $this->execute($handler);
             }
         }
 
-        // Ошибка 404
-        $this->error404();
+        throw new Exception("Маршрут не найден: $method $uri");
     }
 
     /**
-     * Построение регекспа из маршрута
+     * Проверка совпадения маршрута
      */
-    private function matchRoute($pattern, $url, &$params)
+    private function match($pattern, $uri)
     {
-        $pattern = str_replace('/', '\\/', $pattern);
-        $pattern = preg_replace('/:[a-zA-Z0-9_]+/', '([a-zA-Z0-9_-]+)', $pattern);
-        
-        if (preg_match('/^' . $pattern . '$/', $url, $matches)) {
+        $pattern = preg_replace('/:\w+/', '([\w-]+)', $pattern);
+        $pattern = '#^' . $pattern . '$#';
+
+        if (preg_match($pattern, $uri, $matches)) {
             array_shift($matches);
-            $params = $matches;
+            $this->params = $matches;
             return true;
         }
-        
+
         return false;
     }
 
     /**
-     * Выполнение маршрута
+     * Выполнение обработчика маршрута
      */
-    private function executeRoute($action, $params)
+    private function execute($handler)
     {
-        [$controller_name, $method_name] = explode('@', $action);
-        
-        // Подключение нужного контроллера
-        $controller_file = ROOT_PATH . '/app/controllers/' . $controller_name . '.php';
-        
-        if (!file_exists($controller_file)) {
-            $this->error404();
-            return;
+        list($controller, $action) = explode('@', $handler);
+
+        $controller_class = new $controller();
+
+        if (!method_exists($controller_class, $action)) {
+            throw new Exception("Метод $action не найден в $controller");
         }
-        
-        require_once $controller_file;
-        
-        // Создание экземпляра контроллера
-        $controller = new $controller_name();
-        
-        // Проверка аутентификации
-        if (!empty($controller->protected) && !isset($_SESSION['user_id'])) {
-            header('Location: /CookAI/public/login');
-            exit;
-        }
-        
-        // Проверка прав администратора
-        if (!empty($controller->admin_only) && ($_SESSION['user_role'] ?? 'user') !== 'admin') {
-            http_response_code(403);
-            die("Доступ запрещен");
-        }
-        
-        // Вывыв метода контроллера
-        call_user_func_array([$controller, $method_name], $params);
+
+        return call_user_func_array([$controller_class, $action], $this->params);
     }
 
     /**
-     * Ошибка 404
+     * Получение параметров маршрута
      */
-    private function error404()
+    public function getParams()
     {
-        http_response_code(404);
-        require ROOT_PATH . '/app/views/errors/404.php';
+        return $this->params;
     }
 }
 ?>

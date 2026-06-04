@@ -1,56 +1,56 @@
 <?php
 /**
- * AuthController - аутентификация и регистрация
+ * AuthController - контроллер аутентификации
  */
 class AuthController extends Controller
 {
+    private $user;
+
+    public function __construct()
+    {
+        parent::__construct();
+        $this->user = new User();
+    }
+
     /**
      * Форма входа
      */
     public function loginForm()
     {
-        $this->render('auth/login', [
+        if (isset($_SESSION['user_id'])) {
+            $this->redirect('/CookAI/public/');
+        }
+        $this->render('auth.login', [
             'csrf_token' => $this->generateCSRFToken()
         ]);
     }
 
     /**
-     * Вход пользователя
+     * Обработка входа
      */
     public function login()
     {
         $this->validateCSRF();
-        
-        $email = trim($_POST['email'] ?? '');
+
+        $email = $_POST['email'] ?? '';
         $password = $_POST['password'] ?? '';
-        
+
         if (empty($email) || empty($password)) {
-            $this->jsonResponse(false, 'Заполните все поля');
+            $this->jsonResponse(false, 'Заполните все поля', [], 400);
         }
-        
-        $db = Database::getInstance();
-        $user = $db->one(
-            "SELECT * FROM users WHERE email = ?",
-            [$email]
-        );
-        
-        if (!$user || !password_verify($password, $user['password_hash'])) {
-            $this->jsonResponse(false, 'Неверные учетные данные');
+
+        $user = $this->user->getByEmail($email);
+
+        if (!$user || !$this->user->verifyPassword($password, $user['password_hash'])) {
+            $this->jsonResponse(false, 'Неверный email или пароль', [], 401);
         }
-        
-        if ($user['status'] === 'blocked') {
-            $this->jsonResponse(false, 'Ваш аккаунт заблокирован');
-        }
-        
+
         // Установка сессии
         $_SESSION['user_id'] = $user['id'];
         $_SESSION['username'] = $user['username'];
         $_SESSION['user_role'] = $user['role'];
-        $_SESSION['email'] = $user['email'];
-        
-        // Обновление времени последнего входа
-        $db->update('users', ['last_login' => date('Y-m-d H:i:s')], 'id = ?', [$user['id']]);
-        
+        $_SESSION['user_email'] = $user['email'];
+
         $this->jsonResponse(true, 'Вы успешно вошли', [
             'redirect' => '/CookAI/public/'
         ]);
@@ -61,70 +61,67 @@ class AuthController extends Controller
      */
     public function registerForm()
     {
-        $this->render('auth/register', [
+        if (isset($_SESSION['user_id'])) {
+            $this->redirect('/CookAI/public/');
+        }
+        $this->render('auth.register', [
             'csrf_token' => $this->generateCSRFToken()
         ]);
     }
 
     /**
-     * Регистрация нового пользователя
+     * Обработка регистрации
      */
     public function register()
     {
         $this->validateCSRF();
-        
-        $username = trim($_POST['username'] ?? '');
-        $email = trim($_POST['email'] ?? '');
+
+        $username = $_POST['username'] ?? '';
+        $email = $_POST['email'] ?? '';
         $password = $_POST['password'] ?? '';
         $password_confirm = $_POST['password_confirm'] ?? '';
-        
+
         // Валидация
         if (empty($username) || empty($email) || empty($password)) {
-            $this->jsonResponse(false, 'Заполните все поля');
+            $this->jsonResponse(false, 'Заполните все поля', [], 400);
         }
-        
+
         if (strlen($username) < 3) {
-            $this->jsonResponse(false, 'Имя пользователя должно быть минимум 3 символа');
+            $this->jsonResponse(false, 'Имя пользователя должно быть не менее 3 символов', [], 400);
         }
-        
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $this->jsonResponse(false, 'Неверный формат email');
-        }
-        
+
         if (strlen($password) < 6) {
-            $this->jsonResponse(false, 'Пароль должен быть минимум 6 символов');
+            $this->jsonResponse(false, 'Пароль должен быть не менее 6 символов', [], 400);
         }
-        
+
         if ($password !== $password_confirm) {
-            $this->jsonResponse(false, 'Пароли не совпадают');
+            $this->jsonResponse(false, 'Пароли не совпадают', [], 400);
         }
-        
-        $db = Database::getInstance();
-        
-        // Проверка уникальности
-        if ($db->count('users', 'email = ?', [$email]) > 0) {
-            $this->jsonResponse(false, 'Этот email уже используется');
+
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $this->jsonResponse(false, 'Некорректный email', [], 400);
         }
-        
-        if ($db->count('users', 'username = ?', [$username]) > 0) {
-            $this->jsonResponse(false, 'Это имя пользователя уже занято');
+
+        // Проверка существования пользователя
+        if ($this->user->getByEmail($email)) {
+            $this->jsonResponse(false, 'Email уже зарегистрирован', [], 400);
         }
-        
+
         // Создание пользователя
-        $password_hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 10]);
-        
-        $db->insert('users', [
-            'username' => $username,
-            'email' => $email,
-            'password_hash' => $password_hash,
-            'role' => 'user',
-            'status' => 'active',
-            'created_at' => date('Y-m-d H:i:s')
-        ]);
-        
-        $this->jsonResponse(true, 'Регистрация успешна! Перейдите на вход', [
-            'redirect' => '/CookAI/public/login'
-        ]);
+        try {
+            $this->user->create([
+                'username' => $username,
+                'email' => $email,
+                'password' => $password,
+                'role' => 'user'
+            ]);
+
+            $this->jsonResponse(true, 'Регистрация успешна', [
+                'redirect' => '/CookAI/public/login'
+            ]);
+        } catch (Exception $e) {
+            $this->jsonResponse(false, 'Ошибка регистрации: ' . $e->getMessage(), [], 500);
+        }
     }
 
     /**

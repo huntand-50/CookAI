@@ -147,7 +147,7 @@ class AIService
     private function callYandexVision($base64_image, $prompt)
     {
         // Пока используем GPT для анализа как альтернатива
-        $enhanced_prompt = "Проанализируй это изображение блюда (закодировано в base64):\n" . $prompt;
+        $enhanced_prompt = "Проанализируй это изображение блюда:\n" . $prompt;
         return $this->callYandexGPT($enhanced_prompt);
     }
 }

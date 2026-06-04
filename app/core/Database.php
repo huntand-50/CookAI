@@ -1,6 +1,6 @@
 <?php
 /**
- * Database Abstraction Layer
+ * Database - класс для работы с БД
  */
 class Database
 {
@@ -12,6 +12,9 @@ class Database
         $this->pdo = DB;
     }
 
+    /**
+     * Получение singleton экземпляра
+     */
     public static function getInstance()
     {
         if (self::$instance === null) {
@@ -21,85 +24,110 @@ class Database
     }
 
     /**
-     * Выполнение запроса
+     * Выполнение SELECT запроса с одной строкой результата
      */
-    public function query($sql, $params = [])
+    public function one($query, $params = [])
     {
-        $stmt = $this->pdo->prepare($sql);
+        $stmt = $this->pdo->prepare($query);
         $stmt->execute($params);
-        return $stmt;
+        return $stmt->fetch();
     }
 
     /**
-     * Получение одного редктора
+     * Выполнение SELECT запроса со всеми строками результата
      */
-    public function one($sql, $params = [])
+    public function all($query, $params = [])
     {
-        return $this->query($sql, $params)->fetch();
+        $stmt = $this->pdo->prepare($query);
+        $stmt->execute($params);
+        return $stmt->fetchAll();
     }
 
     /**
-     * Получение всех редкторов
+     * Подсчёт количества строк
      */
-    public function all($sql, $params = [])
+    public function count($table, $where = '')
     {
-        return $this->query($sql, $params)->fetchAll();
+        $query = "SELECT COUNT(*) as count FROM $table";
+        if (!empty($where)) {
+            $query .= " WHERE $where";
+        }
+        $result = $this->one($query);
+        return $result['count'] ?? 0;
     }
 
     /**
-     * Вставка
+     * INSERT
      */
     public function insert($table, $data)
     {
         $columns = implode(', ', array_keys($data));
-        $placeholders = ':' . implode(', :', array_keys($data));
-        
-        $sql = "INSERT INTO {$table} ({$columns}) VALUES ({$placeholders})";
-        return $this->query($sql, $data);
+        $placeholders = implode(', ', array_fill(0, count($data), '?'));
+        $query = "INSERT INTO $table ($columns) VALUES ($placeholders)";
+        $stmt = $this->pdo->prepare($query);
+        return $stmt->execute(array_values($data));
     }
 
     /**
-     * Обновление
+     * UPDATE
      */
     public function update($table, $data, $where, $params = [])
     {
-        $set = [];
-        foreach ($data as $key => $value) {
-            $set[] = "{$key} = :{$key}";
-            $params[":{$key}"] = $value;
-        }
-        
-        $set_string = implode(', ', $set);
-        $sql = "UPDATE {$table} SET {$set_string} WHERE {$where}";
-        
-        return $this->query($sql, $params);
+        $set = implode(', ', array_map(fn($k) => "$k = ?", array_keys($data)));
+        $query = "UPDATE $table SET $set WHERE $where";
+        $values = array_merge(array_values($data), $params);
+        $stmt = $this->pdo->prepare($query);
+        return $stmt->execute($values);
     }
 
     /**
-     * Удаление
+     * DELETE
      */
     public function delete($table, $where, $params = [])
     {
-        $sql = "DELETE FROM {$table} WHERE {$where}";
-        return $this->query($sql, $params);
+        $query = "DELETE FROM $table WHERE $where";
+        $stmt = $this->pdo->prepare($query);
+        return $stmt->execute($params);
     }
 
     /**
-     * Получение количества строк
-     */
-    public function count($table, $where = '1', $params = [])
-    {
-        $sql = "SELECT COUNT(*) as count FROM {$table} WHERE {$where}";
-        $result = $this->one($sql, $params);
-        return (int)$result['count'];
-    }
-
-    /**
-     * Получение ID последнего вставленного редктора
+     * ID последней вставки
      */
     public function lastInsertId()
     {
         return $this->pdo->lastInsertId();
+    }
+
+    /**
+     * Начало транзакции
+     */
+    public function beginTransaction()
+    {
+        return $this->pdo->beginTransaction();
+    }
+
+    /**
+     * Коммит транзакции
+     */
+    public function commit()
+    {
+        return $this->pdo->commit();
+    }
+
+    /**
+     * Откат транзакции
+     */
+    public function rollBack()
+    {
+        return $this->pdo->rollBack();
+    }
+
+    /**
+     * Прямое выполнение запроса
+     */
+    public function exec($query)
+    {
+        return $this->pdo->exec($query);
     }
 }
 ?>

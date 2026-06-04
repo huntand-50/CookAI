@@ -1,75 +1,103 @@
 <?php
 /**
- * Base Controller
+ * Controller - базовый класс для контроллеров
  */
 class Controller
 {
-    protected $protected = false; // Требует аутентификацию
-    protected $admin_only = false; // Только для администраторов
+    protected $protected = false;
+    protected $view_path = '';
 
-    /**
-     * Рендер вью
-     */
-    protected function render($view, $data = [])
+    public function __construct()
     {
-        extract($data);
-        require ROOT_PATH . '/app/views/' . $view . '.php';
+        // Проверка авторизации для защищённых контроллеров
+        if ($this->protected && !isset($_SESSION['user_id'])) {
+            $this->redirect('/CookAI/public/login');
+        }
+
+        $this->view_path = ROOT_PATH . '/app/views';
     }
 
     /**
-     * Вывод JSON
+     * Рендеринг представления
      */
-    protected function json($data, $status = 200)
+    protected function render($view, $data = [])
     {
-        header('Content-Type: application/json; charset=utf-8');
-        http_response_code($status);
-        echo json_encode($data, JSON_UNESCAPED_UNICODE);
+        $view_file = $this->view_path . '/' . str_replace('.', '/', $view) . '.php';
+
+        if (!file_exists($view_file)) {
+            throw new Exception("Представление не найдено: $view_file");
+        }
+
+        extract($data);
+
+        ob_start();
+        include $view_file;
+        $content = ob_get_clean();
+
+        include $this->view_path . '/layouts/main.php';
+    }
+
+    /**
+     * Редирект
+     */
+    protected function redirect($url)
+    {
+        header("Location: $url");
         exit;
     }
 
     /**
-     * Проверка CSRF-токена
+     * JSON ответ
      */
-    protected function validateCSRF()
+    protected function jsonResponse($success, $message, $data = [], $status = 200)
     {
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $token = $_POST['_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? null;
-            if (!$token || $token !== $_SESSION['csrf_token']) {
-                $this->json(['error' => 'CSRF несовпадение'], 403);
-            }
-        }
-    }
+        header('Content-Type: application/json');
+        http_response_code($status);
 
-    /**
-     * Отредактирование вывода в JSON
-     */
-    protected function jsonResponse($success = true, $message = '', $data = [])
-    {
-        $this->json([
+        echo json_encode([
             'success' => $success,
             'message' => $message,
             'data' => $data
         ]);
-    }
-
-    /**
-     * Перенаправление
-     */
-    protected function redirect($url)
-    {
-        header('Location: ' . $url);
         exit;
     }
 
     /**
-     * Получение CSRF-токена
+     * Генерация CSRF токена
      */
     protected function generateCSRFToken()
     {
-        if (!isset($_SESSION['csrf_token'])) {
+        if (empty($_SESSION['csrf_token'])) {
             $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
         }
         return $_SESSION['csrf_token'];
+    }
+
+    /**
+     * Валидация CSRF токена
+     */
+    protected function validateCSRF()
+    {
+        $token = $_POST['csrf_token'] ?? '';
+        if (empty($token) || $token !== ($_SESSION['csrf_token'] ?? '')) {
+            $this->jsonResponse(false, 'CSRF токен невалиден', [], 403);
+        }
+    }
+
+    /**
+     * Проверка авторизации
+     */
+    protected function isAuthorized()
+    {
+        return isset($_SESSION['user_id']);
+    }
+
+    /**
+     * Получение текущего пользователя
+     */
+    protected function getCurrentUser()
+    {
+        return $_SESSION['user_id'] ?? null;
     }
 }
 ?>

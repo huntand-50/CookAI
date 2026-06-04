@@ -1,78 +1,60 @@
 <?php
 /**
- * RecipeController - управление рецептами
+ * RecipeController - контроллер рецептов
  */
 class RecipeController extends Controller
 {
+    private $recipe;
     protected $protected = true;
+
+    public function __construct()
+    {
+        parent::__construct();
+        $this->recipe = new Recipe();
+    }
 
     /**
      * Список рецептов
      */
     public function index()
     {
-        $db = Database::getInstance();
-        $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-        $per_page = 12;
-        $offset = ($page - 1) * $per_page;
-        
-        $recipes = $db->all(
-            "SELECT r.*, u.username FROM recipes r 
-             LEFT JOIN users u ON r.user_id = u.id 
-             WHERE r.status = 'active'
-             ORDER BY r.created_at DESC 
-             LIMIT ? OFFSET ?",
-            [$per_page, $offset]
-        );
-        
-        $total = $db->count('recipes', "status = 'active'");
-        $total_pages = ceil($total / $per_page);
-        
-        $this->render('recipes/index', [
+        $page = $_GET['page'] ?? 1;
+        $limit = 12;
+        $offset = ($page - 1) * $limit;
+
+        $recipes = $this->recipe->getActive($limit, $offset);
+        $total = Database::getInstance()->count('recipes', "status = 'active'");
+        $pages = ceil($total / $limit);
+
+        $this->render('recipes.index', [
             'recipes' => $recipes,
             'current_page' => $page,
-            'total_pages' => $total_pages
+            'total_pages' => $pages
         ]);
     }
 
     /**
-     * Показ одного рецепта
+     * Просмотр одного рецепта
      */
     public function show($id)
     {
-        $db = Database::getInstance();
-        $recipe = $db->one(
-            "SELECT r.*, u.username FROM recipes r 
-             LEFT JOIN users u ON r.user_id = u.id 
-             WHERE r.id = ? AND r.status = 'active'",
-            [$id]
-        );
-        
+        $recipe = $this->recipe->getById($id);
+
         if (!$recipe) {
             http_response_code(404);
-            die("Рецепт не найден");
+            echo "Рецепт не найден";
+            return;
         }
-        
-        // Увеличение счетчика просмотров
-        $db->update('recipes', 
-            ['views' => $recipe['views'] + 1], 
-            'id = ?', 
-            [$id]
-        );
-        
-        // Получение комментариев
-        $comments = $db->all(
-            "SELECT c.*, u.username FROM comments c 
-             LEFT JOIN users u ON c.user_id = u.id 
-             WHERE c.recipe_id = ? 
-             ORDER BY c.created_at DESC",
-            [$id]
-        );
-        
-        $this->render('recipes/show', [
-            'recipe' => $recipe,
-            'comments' => $comments,
-            'csrf_token' => $this->generateCSRFToken()
+
+        // Увеличение просмотров
+        $this->recipe->incrementViews($id);
+
+        // Парсинг JSON полей
+        $recipe['ingredients'] = json_decode($recipe['ingredients'], true) ?? [];
+        $recipe['instructions'] = json_decode($recipe['instructions'], true) ?? [];
+
+        $this->render('recipes.show', [
+            'recipe' => $recipe
         ]);
     }
 
@@ -81,28 +63,17 @@ class RecipeController extends Controller
      */
     public function search()
     {
-        $query = trim($_GET['q'] ?? '');
-        $db = Database::getInstance();
-        
+        $query = $_GET['q'] ?? '';
+
         if (empty($query)) {
-            $this->redirect('/CookAI/public/recipes');
+            $recipes = [];
+        } else {
+            $recipes = $this->recipe->search($query);
         }
-        
-        $search_term = '%' . $query . '%';
-        
-        $recipes = $db->all(
-            "SELECT r.*, u.username FROM recipes r 
-             LEFT JOIN users u ON r.user_id = u.id 
-             WHERE r.status = 'active' AND 
-             (r.title LIKE ? OR r.description LIKE ? OR r.ingredients LIKE ?)
-             ORDER BY r.created_at DESC 
-             LIMIT 50",
-            [$search_term, $search_term, $search_term]
-        );
-        
-        $this->render('recipes/search_results', [
-            'recipes' => $recipes,
-            'query' => $query
+
+        $this->render('recipes.search', [
+            'query' => $query,
+            'recipes' => $recipes
         ]);
     }
 
@@ -111,54 +82,48 @@ class RecipeController extends Controller
      */
     public function store()
     {
+        if (!$this->isAuthorized()) {
+            $this->jsonResponse(false, 'Требуется авторизация', [], 401);
+        }
+
         $this->validateCSRF();
-        
-        if (!isset($_SESSION['user_id'])) {
-            $this->jsonResponse(false, 'Вы не авторизованы', [], 403);
-        }
-        
-        $title = trim($_POST['title'] ?? '');
-        $description = trim($_POST['description'] ?? '');
-        $ingredients = trim($_POST['ingredients'] ?? '');
-        $instructions = trim($_POST['instructions'] ?? '');
-        $time_minutes = (int)($_POST['time_minutes'] ?? 0);
-        $difficulty = trim($_POST['difficulty'] ?? 'medium');
-        $servings = (int)($_POST['servings'] ?? 1);
-        
+
+        $data = [
+            'user_id' => $this->getCurrentUser(),
+            'title' => $_POST['title'] ?? '',
+            'description' => $_POST['description'] ?? '',
+            'ingredients' => json_encode($_POST['ingredients'] ?? []),
+            'instructions' => json_encode($_POST['instructions'] ?? []),
+            'time_minutes' => $_POST['time_minutes'] ?? 30,
+            'difficulty' => $_POST['difficulty'] ?? 'medium',
+            'servings' => $_POST['servings'] ?? 1,
+            'calories' => $_POST['calories'] ?? null,
+            'status' => 'draft'
+        ];
+
         // Валидация
-        if (empty($title) || empty($description) || empty($ingredients)) {
-            $this->jsonResponse(false, 'Заполните обязательные поля');
+        if (empty($data['title']) || empty($data['description'])) {
+            $this->jsonResponse(false, 'Заполните все обязательные поля', [], 400);
         }
-        
-        $db = Database::getInstance();
-        
+
         // Загрузка изображения
-        $image_path = null;
-        if (isset($_FILES['image']) && $_FILES['image']['error'] == 0) {
+        if (!empty($_FILES['image'])) {
             $image_path = $this->uploadImage($_FILES['image']);
+            if ($image_path) {
+                $data['image_path'] = $image_path;
+            }
         }
-        
-        // Сохранение рецепта
-        $db->insert('recipes', [
-            'user_id' => $_SESSION['user_id'],
-            'title' => $title,
-            'description' => $description,
-            'ingredients' => $ingredients,
-            'instructions' => $instructions,
-            'time_minutes' => $time_minutes,
-            'difficulty' => $difficulty,
-            'servings' => $servings,
-            'image_path' => $image_path,
-            'status' => 'active',
-            'created_at' => date('Y-m-d H:i:s')
-        ]);
-        
-        $recipe_id = $db->lastInsertId();
-        
-        $this->jsonResponse(true, 'Рецепт создан успешно', [
-            'id' => $recipe_id,
-            'redirect' => '/CookAI/public/recipe/' . $recipe_id
-        ]);
+
+        try {
+            $this->recipe->create($data);
+            $recipe_id = Database::getInstance()->lastInsertId();
+
+            $this->jsonResponse(true, 'Рецепт создан', [
+                'redirect' => '/CookAI/public/recipe/' . $recipe_id
+            ]);
+        } catch (Exception $e) {
+            $this->jsonResponse(false, 'Ошибка: ' . $e->getMessage(), [], 500);
+        }
     }
 
     /**
@@ -166,26 +131,30 @@ class RecipeController extends Controller
      */
     private function uploadImage($file)
     {
-        $allowed = ['jpg', 'jpeg', 'png', 'gif'];
-        $filename = basename($file['name']);
-        $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-        
-        if (!in_array($ext, $allowed)) {
-            return null;
+        $allowed_types = ['image/jpeg', 'image/png', 'image/webp'];
+        $max_size = 5 * 1024 * 1024; // 5MB
+
+        if (!in_array($file['type'], $allowed_types)) {
+            return false;
         }
-        
-        $new_name = uniqid('recipe_') . '.' . $ext;
+
+        if ($file['size'] > $max_size) {
+            return false;
+        }
+
         $upload_dir = ROOT_PATH . '/storage/uploads/recipes/';
-        
         if (!is_dir($upload_dir)) {
             mkdir($upload_dir, 0755, true);
         }
-        
-        if (move_uploaded_file($file['tmp_name'], $upload_dir . $new_name)) {
-            return '/storage/uploads/recipes/' . $new_name;
+
+        $filename = uniqid() . '_' . basename($file['name']);
+        $filepath = $upload_dir . $filename;
+
+        if (move_uploaded_file($file['tmp_name'], $filepath)) {
+            return '/CookAI/storage/uploads/recipes/' . $filename;
         }
-        
-        return null;
+
+        return false;
     }
 }
 ?>

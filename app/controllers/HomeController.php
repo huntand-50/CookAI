@@ -1,52 +1,28 @@
 <?php
 /**
- * HomeController - главная страница
+ * HomeController - контроллер главной страницы
  */
 class HomeController extends Controller
 {
+    private $recipe;
+
+    public function __construct()
+    {
+        parent::__construct();
+        $this->recipe = new Recipe();
+    }
+
+    /**
+     * Главная страница
+     */
     public function index()
     {
-        $db = Database::getInstance();
-        
-        // Получение популярных рецептов
-        $popular_recipes = $db->all(
-            "SELECT r.*, u.username FROM recipes r 
-             LEFT JOIN users u ON r.user_id = u.id 
-             WHERE r.status = 'active' 
-             ORDER BY r.views DESC LIMIT 6"
-        );
-        
-        // Получение сезонных рецептов
-        $seasonal_recipes = $db->all(
-            "SELECT r.*, u.username FROM recipes r 
-             LEFT JOIN users u ON r.user_id = u.id 
-             WHERE r.status = 'active' AND r.is_seasonal = 1
-             ORDER BY r.created_at DESC LIMIT 6"
-        );
-        
-        // Получение всех рецептов с пагинацией
-        $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-        $per_page = 12;
-        $offset = ($page - 1) * $per_page;
-        
-        $all_recipes = $db->all(
-            "SELECT r.*, u.username FROM recipes r 
-             LEFT JOIN users u ON r.user_id = u.id 
-             WHERE r.status = 'active'
-             ORDER BY r.created_at DESC 
-             LIMIT ? OFFSET ?",
-            [$per_page, $offset]
-        );
-        
-        $total_recipes = $db->count('recipes', "status = 'active'");
-        $total_pages = ceil($total_recipes / $per_page);
-        
-        $this->render('home/index', [
+        $popular_recipes = $this->recipe->getPopular(6);
+        $seasonal_recipes = $this->recipe->getSeasonal(3);
+
+        $this->render('home.index', [
             'popular_recipes' => $popular_recipes,
-            'seasonal_recipes' => $seasonal_recipes,
-            'all_recipes' => $all_recipes,
-            'current_page' => $page,
-            'total_pages' => $total_pages
+            'seasonal_recipes' => $seasonal_recipes
         ]);
     }
 }
