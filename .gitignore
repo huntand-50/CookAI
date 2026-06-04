@@ -1,0 +1,36 @@
+# Ignore files and directories
+.env
+.env.local
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Cache
+storage/cache/*
+!storage/cache/.gitkeep
+
+# Uploads
+storage/uploads/*
+!storage/uploads/.gitkeep
+
+# Dependencies
+vendor/
+node_modules/
+composer.lock
+package-lock.json
+
+# Session files
+/session/
+
+# Temporary files
+*.tmp
+*.temp
