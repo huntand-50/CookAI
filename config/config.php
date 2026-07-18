@@ -101,22 +101,23 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 // ============================================================
-//  YANDEX AI (из переменных окружения)
+//  YANDEX AI (из переменных окружения + конфиг)
 // ============================================================
 define('YANDEX_API_KEY', getenv('YANDEX_API_KEY') ?: '');
 define('YANDEX_FOLDER_ID', getenv('YANDEX_FOLDER_ID') ?: '');
 define('YANDEX_COMPLETION_URL', 'https://llm.api.cloud.yandex.net/foundationModels/v1/completion');
-define('YANDEX_GPT_MODEL', 'gpt://' . YANDEX_FOLDER_ID . '/yandexgpt/latest');
-define('YANDEX_VISION_MODEL', 'gpt://' . YANDEX_FOLDER_ID . '/yandex-gpt-vision/latest');
-define('YANDEX_ART_URL', 'https://llm.api.cloud.yandex.net/foundationModels/v1/imageGenerationAsync');
-define('YANDEX_ART_MODEL', 'art://' . YANDEX_FOLDER_ID . '/yandex-art/latest');
+
+// Модели AI
+define('YANDEX_GPT_4_LITE_MODEL', 'yandexgpt-4-lite/latest');
+define('QWEN_3_6_MODEL', 'qwen3.6-35b-a3b/latest');
+
+// Лимиты загрузки изображений
+define('MAX_IMAGE_SIZE', 5 * 1024 * 1024);
+define('ALLOWED_IMAGE_TYPES', 'image/jpeg,image/png,image/webp');
 
 if ((!YANDEX_API_KEY || !YANDEX_FOLDER_ID) && APP_ENV === 'production') {
     error_log('WARNING: Yandex AI credentials not configured. Set YANDEX_API_KEY, YANDEX_FOLDER_ID.');
 }
-
-define('MAX_IMAGE_SIZE', 5 * 1024 * 1024);
-define('ALLOWED_IMAGE_TYPES', 'image/jpeg,image/png,image/webp');
 
 // --- AI rate-limit (дневные лимиты по фичам) ---
 define('AI_LIMIT_GUEST', 2);
@@ -124,7 +125,7 @@ define('AI_LIMIT_PRO', 40);
 define('AI_LIMITS', [
     'generate' => [AI_LIMIT_GUEST, AI_LIMIT_PRO],
     'calorie'  => [2, AI_LIMIT_PRO],
-    'image'    => [1, 20],
+    'cookbook' => [1, 20],
 ]);
 
 // ============================================================
